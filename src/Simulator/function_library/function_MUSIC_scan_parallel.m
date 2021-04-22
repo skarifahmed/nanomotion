@@ -1,0 +1,110 @@
+function [MUSIC_out,M,S_matrix]=function_MUSIC_scan(imageStack,x_val,y_val,...
+    Pseudospectrum_option, Option_SVD, SNR_cutoff, M_minus,...
+    data_window_lat,interpol_window_lat, data_window_weights_option, G_std,...
+    G_PSF, x_foc,y_foc,test_points_per_pixel, flip_data)
+
+% data window pixels
+data_pixels=sqrt(size(G_PSF,1));
+ceil_half_data_window=ceil(sqrt(size(G_PSF,1))/2);
+data_window_pixels=(ceil_half_data_window-floor(data_window_lat/2)):(ceil_half_data_window+floor(data_window_lat/2));
+length_data_window_pixels=length(data_window_pixels);
+
+% test interpolation window pixels
+test_points=sqrt(size(G_PSF,2));
+ceil_half_test_window=ceil(sqrt(size(G_PSF,2))/(2*test_points_per_pixel));
+test_window_pixels=(test_points_per_pixel*(ceil_half_test_window-floor(interpol_window_lat/2) -1 ) +1):(test_points_per_pixel*(ceil_half_test_window+floor(interpol_window_lat/2)));
+length_test_window_pixels=length(test_window_pixels);
+
+% reducing PSF to desired data and test point selections
+G_PSF=reshape(G_PSF,data_pixels,data_pixels,test_points,test_points);
+G_PSF=G_PSF(data_window_pixels,data_window_pixels,test_window_pixels,test_window_pixels);
+G_PSF=reshape(G_PSF,length_data_window_pixels^2,length_test_window_pixels^2);
+x_foc=x_foc(test_window_pixels);
+y_foc=y_foc(test_window_pixels);
+
+% making filter pad;
+floor_half_data_window=floor(sqrt(size(G_PSF,1))/2);
+data_window=sqrt(size(G_PSF,1));
+[x_temp,y_temp]=meshgrid(1:data_window,1:data_window);
+Gaussian_pad=mvnpdf([x_temp(:) y_temp(:)],floor_half_data_window+[1 1],[G_std G_std]);
+Gaussian_pad=Gaussian_pad/max(Gaussian_pad);
+
+% used later in interleaving the test windows:
+floor_half_interpol_window=floor(interpol_window_lat/2);
+ceil_half_interpol_window=ceil(interpol_window_lat/2);
+
+numberOfImages=size(imageStack,3);
+
+S_matrix=zeros(data_window_lat^2,length(y_val),length(x_val));
+
+% mkdir(str_temp_folder)
+%%{
+parfor y_ind=1:length(y_val);
+            
+    y=y_val(y_ind);
+    S=zeros(data_window_lat^2,length(x_val));
+    Mx=zeros(1,length(x_val));
+    Windowsx=cell(1,length(x_val));
+    for x_ind=1:length(x_val);
+        x=x_val(x_ind);
+        
+        y_min=max([y-floor_half_data_window,1]);
+        y_max=min([y+floor_half_data_window,size(imageStack,1)]);
+        x_min=max([x-floor_half_data_window,1]);
+        x_max=min([x+floor_half_data_window,size(imageStack,2)]);
+        im=imageStack(y_min:y_max,x_min:x_max,:);
+        im_=reshape(im,[],numberOfImages);
+        
+        
+        Py_min=max(1,(floor_half_data_window+1)-(y-1));
+        Py_max=min(2*floor_half_data_window+1,(floor_half_data_window+1)+(size(imageStack,1)-y));
+        Px_min=max(1,(floor_half_data_window+1)-(x-1));
+        Px_max=min(2*floor_half_data_window+1,(floor_half_data_window+1)+(size(imageStack,2)-x));
+        G_PSF_=reshape(G_PSF,data_window,data_window,[]);
+        G_PSF_=G_PSF_(Py_min:Py_max,Px_min:Px_max,:);
+        G_PSF_=reshape(G_PSF_,[],size(G_PSF_,3));
+        
+        Gaussian_pad_=reshape(Gaussian_pad,data_window,data_window);
+        Gaussian_pad_=Gaussian_pad_(Py_min:Py_max,Px_min:Px_max);
+        
+        if strcmpi(data_window_weights_option,'empty')
+            data_window_weights=[];
+        elseif strcmpi(data_window_weights_option,'PSF')
+            data_window_weights=G_PSF_(:,ceil(size(G_PSF_,2)/2));
+        else
+            data_window_weights=Gaussian_pad_(:);
+        end
+        [Pseudospectrum,Mx(x_ind),signal_strength,s,d_PN,d_PS]=function_MUSIC (im_, G_PSF_,min(size(im_))-M_minus,Option_SVD,Pseudospectrum_option,data_window_weights,SNR_cutoff);;
+        if length(s(:)) < data_window_lat^2 
+            s=[s(:);zeros(data_window_lat^2 -length(s(:)),1)];
+        end
+        S(:,x_ind)=s(:);
+        current=reshape(Pseudospectrum,length(y_foc),length(x_foc));
+        if flip_data
+            current=fliplr(flipud(current));
+        end
+        Windowsx{x_ind}=current;
+    end
+    S_matrix(:,y_ind,:)=S;
+    M(y_ind,:)=Mx;
+    Windows(y_ind,:)=Windowsx;
+end
+S_matrix=reshape(S_matrix,size(S_matrix,1),[]);
+MUSIC=zeros(length(y_val)*test_points_per_pixel,length(x_val)*test_points_per_pixel);
+MUSIC_factor=zeros(length(y_val)*test_points_per_pixel,length(x_val)*test_points_per_pixel);
+
+for y_ind=1:length(y_val)
+    for x_ind=1:length(x_val)
+        current=Windows{y_val,x_val};
+        x_ind_result=(1:length(x_foc))-(floor_half_interpol_window)*test_points_per_pixel+(x_ind-1)*test_points_per_pixel;
+        y_ind_result=(1:length(y_foc))-(floor_half_interpol_window)*test_points_per_pixel+(y_ind-1)*test_points_per_pixel;
+        
+        keep_x=x_ind_result>0 & x_ind_result<=size(MUSIC,2);
+        keep_y=y_ind_result>0 & y_ind_result<=size(MUSIC,1);
+        MUSIC(y_ind_result(keep_y),x_ind_result(keep_x))=MUSIC(y_ind_result(keep_y),x_ind_result(keep_x))+current(keep_y,keep_x);
+        MUSIC_factor(y_ind_result(keep_y),x_ind_result(keep_x))=MUSIC_factor(y_ind_result(keep_y),x_ind_result(keep_x))+1;
+        
+    end
+end
+MUSIC_out=MUSIC./MUSIC_factor;
+end

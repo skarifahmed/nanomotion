@@ -4,6 +4,7 @@
 Sekh, Arif Ahmed, et al. "Learning nanoscale motion patterns of vesicles in living cells.
 " Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition. 2020. 
 [Link to The Paper](https://openaccess.thecvf.com/content_CVPR_2020/html/Sekh_Learning_Nanoscale_Motion_Patterns_of_Vesicles_in_Living_Cells_CVPR_2020_paper.html)
+</ br>
 [Project Page](https://nanoscalemotion.github.io/)
 
 
